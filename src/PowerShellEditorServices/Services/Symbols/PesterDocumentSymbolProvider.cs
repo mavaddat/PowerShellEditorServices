@@ -42,9 +42,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
         /// <returns>true if the Ast represents a PowerShell command with arguments, false otherwise</returns>
         private static bool IsNamedCommandWithArguments(Ast ast)
         {
-            CommandAst commandAst = ast as CommandAst;
-
-            return commandAst != null &&
+            return ast is CommandAst commandAst &&
                 commandAst.InvocationOperator != TokenKind.Dot &&
                 PesterSymbolReference.GetCommandType(commandAst.GetCommandName()).HasValue &&
                 commandAst.CommandElements.Count >= 2;
@@ -69,7 +67,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
             }
 
             // Ensure that the last argument of the command is a scriptblock
-            if (!(commandAst.CommandElements[commandAst.CommandElements.Count-1] is ScriptBlockExpressionAst))
+            if (commandAst.CommandElements[commandAst.CommandElements.Count - 1] is not ScriptBlockExpressionAst)
             {
                 return false;
             }
@@ -102,7 +100,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
                 CommandElementAst currentCommandElement = pesterCommandAst.CommandElements[i];
 
                 // Check for an explicit "-Name" parameter
-                if (currentCommandElement is CommandParameterAst parameterAst)
+                if (currentCommandElement is CommandParameterAst)
                 {
                     // Found -Name parameter, move to next element which is the argument for -TestName
                     i++;
@@ -142,7 +140,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
                 return true;
             }
 
-            return (commandElementAst is ExpandableStringExpressionAst);
+            return commandElementAst is ExpandableStringExpressionAst;
         }
     }
 
@@ -181,17 +179,17 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
                 .Cast<PesterCommandType>()
                 .ToDictionary(pct => pct.ToString(), pct => pct, StringComparer.OrdinalIgnoreCase);
 
-        private static char[] DefinitionTrimChars = new char[] { ' ', '{' };
+        private static readonly char[] DefinitionTrimChars = new char[] { ' ', '{' };
 
         /// <summary>
         /// Gets the name of the test
         /// </summary>
-        public string TestName { get; private set; }
+        public string TestName { get; }
 
         /// <summary>
         /// Gets the test's command type.
         /// </summary>
-        public PesterCommandType Command { get; private set; }
+        public PesterCommandType Command { get; }
 
         internal PesterSymbolReference(
             ScriptFile scriptFile,
@@ -206,14 +204,13 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
                     scriptFile.FilePath,
                     testLine)
         {
-            this.Command = commandType;
-            this.TestName = testName;
+            Command = commandType;
+            TestName = testName;
         }
 
         internal static PesterCommandType? GetCommandType(string commandName)
         {
-            PesterCommandType pesterCommandType;
-            if (commandName == null || !PesterKeywords.TryGetValue(commandName, out pesterCommandType))
+            if (commandName == null || !PesterKeywords.TryGetValue(commandName, out PesterCommandType pesterCommandType))
             {
                 return null;
             }

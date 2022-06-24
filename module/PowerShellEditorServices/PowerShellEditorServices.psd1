@@ -19,7 +19,7 @@ RootModule = if ($PSEdition -eq 'Core')
     }
 
 # Version number of this module.
-ModuleVersion = '3.1.3'
+ModuleVersion = '3.4.4'
 
 # ID used to uniquely identify this module
 GUID = '9ca15887-53a2-479a-9cda-48d26bcb6c47'
@@ -49,7 +49,7 @@ PowerShellVersion = '5.1'
 
 # Minimum version of Microsoft .NET Framework required by this module
 # NOTE: We check this later, so that the error message is communicated properly to the user
-# DotNetFrameworkVersion = '4.6.1'
+# DotNetFrameworkVersion = '4.6.2'
 
 # Minimum version of the common language runtime (CLR) required by this module
 # CLRVersion = ''
@@ -129,4 +129,3 @@ PrivateData = @{
 # DefaultCommandPrefix = ''
 
 }
-

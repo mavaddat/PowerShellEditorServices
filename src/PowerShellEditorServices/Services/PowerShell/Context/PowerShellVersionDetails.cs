@@ -42,23 +42,23 @@ namespace Microsoft.PowerShell.EditorServices.Services.PowerShell.Context
         /// <summary>
         /// Gets the version of the PowerShell runtime.
         /// </summary>
-        public Version Version { get; private set; }
+        public Version Version { get; }
 
         /// <summary>
         /// Gets the full version string, either the ToString of the Version
         /// property or the GitCommitId for open-source PowerShell releases.
         /// </summary>
-        public string VersionString { get; private set; }
+        public string VersionString { get; }
 
         /// <summary>
         /// Gets the PowerShell edition (generally Desktop or Core).
         /// </summary>
-        public string Edition { get; private set; }
+        public string Edition { get; }
 
         /// <summary>
         /// Gets the architecture of the PowerShell process.
         /// </summary>
-        public PowerShellProcessArchitecture Architecture { get; private set; }
+        public PowerShellProcessArchitecture Architecture { get; }
 
         #endregion
 
@@ -77,10 +77,10 @@ namespace Microsoft.PowerShell.EditorServices.Services.PowerShell.Context
             string editionString,
             PowerShellProcessArchitecture architecture)
         {
-            this.Version = version;
-            this.VersionString = versionString;
-            this.Edition = editionString;
-            this.Architecture = architecture;
+            Version = version;
+            VersionString = versionString;
+            Edition = editionString;
+            Architecture = architecture;
         }
 
         #endregion
@@ -91,13 +91,14 @@ namespace Microsoft.PowerShell.EditorServices.Services.PowerShell.Context
         /// Gets the PowerShell version details for the given runspace.
         /// </summary>
         /// <param name="logger">An ILogger implementation used for writing log messages.</param>
+        /// <param name="pwsh">The PowerShell instance for which to to get the version.</param>
         /// <returns>A new PowerShellVersionDetails instance.</returns>
         public static PowerShellVersionDetails GetVersionDetails(ILogger logger, PowerShell pwsh)
         {
-            Version powerShellVersion = new Version(5, 0);
+            Version powerShellVersion = new(5, 0);
             string versionString = null;
             string powerShellEdition = "Desktop";
-            var architecture = PowerShellProcessArchitecture.Unknown;
+            PowerShellProcessArchitecture architecture = PowerShellProcessArchitecture.Unknown;
 
             try
             {
@@ -108,8 +109,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.PowerShell.Context
 
                 if (psVersionTable != null)
                 {
-                    var edition = psVersionTable["PSEdition"] as string;
-                    if (edition != null)
+                    if (psVersionTable["PSEdition"] is string edition)
                     {
                         powerShellEdition = edition;
                     }
@@ -117,10 +117,10 @@ namespace Microsoft.PowerShell.EditorServices.Services.PowerShell.Context
                     // The PSVersion value will either be of Version or SemanticVersion.
                     // In the former case, take the value directly.  In the latter case,
                     // generate a Version from its string representation.
-                    var version = psVersionTable["PSVersion"];
-                    if (version is Version)
+                    object version = psVersionTable["PSVersion"];
+                    if (version is Version version2)
                     {
-                        powerShellVersion = (Version)version;
+                        powerShellVersion = version2;
                     }
                     else if (version != null)
                     {
@@ -128,17 +128,9 @@ namespace Microsoft.PowerShell.EditorServices.Services.PowerShell.Context
                         powerShellVersion = new Version(version.ToString().Split('-')[0]);
                     }
 
-                    var gitCommitId = psVersionTable["GitCommitId"] as string;
-                    if (gitCommitId != null)
-                    {
-                        versionString = gitCommitId;
-                    }
-                    else
-                    {
-                        versionString = powerShellVersion.ToString();
-                    }
+                    versionString = psVersionTable["GitCommitId"] is string gitCommitId ? gitCommitId : powerShellVersion.ToString();
 
-                    var procArchCommand = new PSCommand().AddScript("$env:PROCESSOR_ARCHITECTURE", useLocalScope: true);
+                    PSCommand procArchCommand = new PSCommand().AddScript("$env:PROCESSOR_ARCHITECTURE", useLocalScope: true);
 
                     string arch = pwsh
                         .AddScript("$env:PROCESSOR_ARCHITECTURE", useLocalScope: true)

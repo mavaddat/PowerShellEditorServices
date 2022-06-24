@@ -36,7 +36,7 @@ namespace Microsoft.PowerShell.EditorServices.Hosting
         /// no version is specified by the host application, we use 0.0.0
         /// to indicate a lack of version.
         /// </summary>
-        private static readonly Version s_defaultHostVersion = new Version(0, 0, 0);
+        private static readonly Version s_defaultHostVersion = new(0, 0, 0);
 
         #endregion
 
@@ -101,7 +101,7 @@ namespace Microsoft.PowerShell.EditorServices.Hosting
         /// The minimum log level of log events to be logged.
         /// </summary>
         /// <remarks>
-        /// This is cast to all of <see cref="PsesLogLevel"/>, <see
+        /// This is cast to all of <see cref="Hosting.PsesLogLevel"/>, <see
         /// cref="Microsoft.Extensions.Logging.LogLevel"/>, and <see
         /// cref="Serilog.Events.LogEventLevel"/>, hence it is an <c>int</c>.
         /// </remarks>
@@ -131,8 +131,7 @@ namespace Microsoft.PowerShell.EditorServices.Hosting
         /// </param>
         /// <param name="version">The host application's version.</param>
         /// <param name="psHost">The PowerShell host to use.</param>
-        /// <param name="allUsersProfilePath">The path to the shared profile.</param>
-        /// <param name="currentUsersProfilePath">The path to the user specific profile.</param>
+        /// <param name="profilePaths">The set of profile paths.</param>
         /// <param name="featureFlags">Flags of features to enable.</param>
         /// <param name="additionalModules">Names or paths of additional modules to import.</param>
         /// <param name="initialSessionState">The language mode inherited from the orginal PowerShell process. This will be used when creating runspaces so that we honor the same initialSessionState including allowed modules, cmdlets and language mode.</param>

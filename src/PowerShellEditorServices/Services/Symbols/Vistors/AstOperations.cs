@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.PowerShell.EditorServices.Services.PowerShell;
 using Microsoft.PowerShell.EditorServices.Services.PowerShell.Execution;
+using Microsoft.PowerShell.EditorServices.Services.PowerShell.Host;
 
 namespace Microsoft.PowerShell.EditorServices.Services.Symbols
 {
@@ -33,7 +34,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
             ParameterExpression originalPosition = Expression.Parameter(typeof(IScriptPosition));
             ParameterExpression newOffset = Expression.Parameter(typeof(int));
 
-            var parameters = new ParameterExpression[] { originalPosition, newOffset };
+            ParameterExpression[] parameters = new ParameterExpression[] { originalPosition, newOffset };
             s_clonePositionWithNewOffset = Expression.Lambda<Func<IScriptPosition, int, IScriptPosition>>(
                 Expression.Call(
                     Expression.Convert(originalPosition, internalScriptPositionType),
@@ -55,7 +56,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
         /// <param name="fileOffset">
         /// The 1-based file offset at which a symbol will be located.
         /// </param>
-        /// <param name="powerShellContext">
+        /// <param name="executionService">
         /// The PowerShellContext to use for gathering completions.
         /// </param>
         /// <param name="logger">An ILogger implementation used for writing log messages.</param>
@@ -76,22 +77,45 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
         {
             IScriptPosition cursorPosition = s_clonePositionWithNewOffset(scriptAst.Extent.StartScriptPosition, fileOffset);
 
-            logger.LogTrace(
-                string.Format(
-                    "Getting completions at offset {0} (line: {1}, column: {2})",
-                    fileOffset,
-                    cursorPosition.LineNumber,
-                    cursorPosition.ColumnNumber));
+            logger.LogTrace($"Getting completions at offset {fileOffset} (line: {cursorPosition.LineNumber}, column: {cursorPosition.ColumnNumber})");
 
-            var stopwatch = new Stopwatch();
+            Stopwatch stopwatch = new();
 
             CommandCompletion commandCompletion = null;
             await executionService.ExecuteDelegateAsync(
                 representation: "CompleteInput",
                 new ExecutionOptions { Priority = ExecutionPriority.Next },
-                (pwsh, cancellationToken) =>
+                (pwsh, _) =>
                 {
                     stopwatch.Start();
+
+                    // If the current runspace is not out of process, then we call TabExpansion2 so
+                    // that we have the ability to issue pipeline stop requests on cancellation.
+                    if (executionService is PsesInternalHost psesInternalHost
+                        && !psesInternalHost.Runspace.RunspaceIsRemote)
+                    {
+                        IReadOnlyList<CommandCompletion> completionResults = new SynchronousPowerShellTask<CommandCompletion>(
+                            logger,
+                            psesInternalHost,
+                            new PSCommand()
+                                .AddCommand("TabExpansion2")
+                                    .AddParameter("ast", scriptAst)
+                                    .AddParameter("tokens", currentTokens)
+                                    .AddParameter("positionOfCursor", cursorPosition),
+                            executionOptions: null,
+                            cancellationToken)
+                            .ExecuteAndGetResult(cancellationToken);
+
+                        if (completionResults is { Count: > 0 })
+                        {
+                            commandCompletion = completionResults[0];
+                        }
+
+                        return;
+                    }
+
+                    // If the current runspace is out of process, we can't call TabExpansion2
+                    // because the output will be serialized.
                     commandCompletion = CommandCompletion.CompleteInput(
                         scriptAst,
                         currentTokens,
@@ -103,7 +127,15 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
                 .ConfigureAwait(false);
 
             stopwatch.Stop();
-            logger.LogTrace($"IntelliSense completed in {stopwatch.ElapsedMilliseconds}ms.");
+            logger.LogTrace(
+                "IntelliSense completed in {elapsed}ms - WordToComplete: \"{word}\" MatchCount: {count}",
+                stopwatch.ElapsedMilliseconds,
+                commandCompletion.ReplacementLength > 0
+                    ? scriptAst.Extent.StartScriptPosition.GetFullScript()?.Substring(
+                        commandCompletion.ReplacementIndex,
+                        commandCompletion.ReplacementLength)
+                    : null,
+                commandCompletion.CompletionMatches.Count);
 
             return commandCompletion;
         }
@@ -113,7 +145,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
         /// </summary>
         /// <param name="scriptAst">The abstract syntax tree of the given script</param>
         /// <param name="lineNumber">The line number of the cursor for the given script</param>
-        /// <param name="columnNumber">The coulumn number of the cursor for the given script</param>
+        /// <param name="columnNumber">The column number of the cursor for the given script</param>
         /// <param name="includeFunctionDefinitions">Includes full function definition ranges in the search.</param>
         /// <returns>SymbolReference of found symbol</returns>
         public static SymbolReference FindSymbolAtPosition(
@@ -123,7 +155,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
             bool includeFunctionDefinitions = false)
         {
             FindSymbolVisitor symbolVisitor =
-                new FindSymbolVisitor(
+                new(
                     lineNumber,
                     columnNumber,
                     includeFunctionDefinitions);
@@ -142,7 +174,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
         /// <returns>SymbolReference of found command</returns>
         public static SymbolReference FindCommandAtPosition(Ast scriptAst, int lineNumber, int columnNumber)
         {
-            FindCommandVisitor commandVisitor = new FindCommandVisitor(lineNumber, columnNumber);
+            FindCommandVisitor commandVisitor = new(lineNumber, columnNumber);
             scriptAst.Visit(commandVisitor);
 
             return commandVisitor.FoundCommandReference;
@@ -152,7 +184,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
         /// Finds all references (including aliases) in a script for the given symbol
         /// </summary>
         /// <param name="scriptAst">The abstract syntax tree of the given script</param>
-        /// <param name="symbolReference">The symbol that we are looking for referneces of</param>
+        /// <param name="symbolReference">The symbol that we are looking for references of</param>
         /// <param name="cmdletToAliasDictionary">Dictionary maping cmdlets to aliases for finding alias references</param>
         /// <param name="aliasToCmdletDictionary">Dictionary maping aliases to cmdlets for finding alias references</param>
         /// <returns></returns>
@@ -183,11 +215,8 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
             Ast scriptAst,
             SymbolReference symbolReference)
         {
-            FindDeclarationVisitor declarationVisitor =
-                new FindDeclarationVisitor(
-                    symbolReference);
+            FindDeclarationVisitor declarationVisitor = new(symbolReference);
             scriptAst.Visit(declarationVisitor);
-
             return declarationVisitor.FoundDeclaration;
         }
 
@@ -195,17 +224,14 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
         /// Finds all symbols in a script
         /// </summary>
         /// <param name="scriptAst">The abstract syntax tree of the given script</param>
-        /// <param name="powerShellVersion">The PowerShell version the Ast was generated from</param>
         /// <returns>A collection of SymbolReference objects</returns>
-        public static IEnumerable<SymbolReference> FindSymbolsInDocument(Ast scriptAst, Version powerShellVersion)
+        public static IEnumerable<SymbolReference> FindSymbolsInDocument(Ast scriptAst)
         {
-            IEnumerable<SymbolReference> symbolReferences = null;
-
             // TODO: Restore this when we figure out how to support multiple
             //       PS versions in the new PSES-as-a-module world (issue #276)
             //            if (powerShellVersion >= new Version(5,0))
             //            {
-            //#if PowerShellv5
+            //#if PowerShell v5
             //                FindSymbolsVisitor2 findSymbolsVisitor = new FindSymbolsVisitor2();
             //                scriptAst.Visit(findSymbolsVisitor);
             //                symbolReferences = findSymbolsVisitor.SymbolReferences;
@@ -213,10 +239,9 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
             //            }
             //            else
 
-            FindSymbolsVisitor findSymbolsVisitor = new FindSymbolsVisitor();
+            FindSymbolsVisitor findSymbolsVisitor = new();
             scriptAst.Visit(findSymbolsVisitor);
-            symbolReferences = findSymbolsVisitor.SymbolReferences;
-            return symbolReferences;
+            return findSymbolsVisitor.SymbolReferences;
         }
 
         /// <summary>
@@ -240,9 +265,9 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
                         0);
         }
 
-        static private bool IsPowerShellDataFileAstNode(dynamic node, Type[] levelAstMap, int level)
+        private static bool IsPowerShellDataFileAstNode(dynamic node, Type[] levelAstMap, int level)
         {
-            var levelAstTypeMatch = node.Item.GetType().Equals(levelAstMap[level]);
+            dynamic levelAstTypeMatch = node.Item.GetType().Equals(levelAstMap[level]);
             if (!levelAstTypeMatch)
             {
                 return false;
@@ -253,10 +278,10 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
                 return levelAstTypeMatch;
             }
 
-            var astsFound = (node.Item as Ast).FindAll(a => a is Ast, false);
+            IEnumerable<Ast> astsFound = (node.Item as Ast)?.FindAll(a => a is not null, false);
             if (astsFound != null)
             {
-                foreach (var astFound in astsFound)
+                foreach (Ast astFound in astsFound)
                 {
                     if (!astFound.Equals(node.Item)
                         && node.Item.Equals(astFound.Parent)
@@ -281,7 +306,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.Symbols
         /// <returns></returns>
         public static string[] FindDotSourcedIncludes(Ast scriptAst, string psScriptRoot)
         {
-            FindDotSourcedVisitor dotSourcedVisitor = new FindDotSourcedVisitor(psScriptRoot);
+            FindDotSourcedVisitor dotSourcedVisitor = new(psScriptRoot);
             scriptAst.Visit(dotSourcedVisitor);
 
             return dotSourcedVisitor.DotSourcedFiles.ToArray();

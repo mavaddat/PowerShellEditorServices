@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation.
+// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
 using System;
@@ -14,8 +14,8 @@ namespace Microsoft.PowerShell.EditorServices.Services.PowerShell.Utility
     /// Implicitly handles the merging and cleanup of cancellation token sources.
     /// </summary>
     /// <example>
-    /// The <see cref="Microsoft.PowerShell.EditorServices.Services.PowerShell.Utility.CancellationContext"/> class
-    /// and the <see cref="Microsoft.PowerShell.EditorServices.Services.PowerShell.Utility.CancellationScope"/> struct
+    /// The <see cref="CancellationContext"/> class
+    /// and the <see cref="CancellationScope"/> struct
     /// are intended to be used with a <c>using</c> block so you can do this:
     /// <code>
     ///     using (CancellationScope cancellationScope = _cancellationContext.EnterScope(_globalCancellationSource.CancellationToken, localCancellationToken))
@@ -28,10 +28,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.PowerShell.Utility
     {
         private readonly ConcurrentStack<CancellationScope> _cancellationSourceStack;
 
-        public CancellationContext()
-        {
-            _cancellationSourceStack = new ConcurrentStack<CancellationScope>();
-        }
+        public CancellationContext() => _cancellationSourceStack = new ConcurrentStack<CancellationScope>();
 
         public CancellationScope EnterScope(bool isIdleScope, CancellationToken cancellationToken)
         {
@@ -82,7 +79,7 @@ namespace Microsoft.PowerShell.EditorServices.Services.PowerShell.Utility
 
         private CancellationScope EnterScope(bool isIdleScope, CancellationTokenSource cancellationFrameSource)
         {
-            var scope = new CancellationScope(_cancellationSourceStack, cancellationFrameSource, isIdleScope);
+            CancellationScope scope = new(_cancellationSourceStack, cancellationFrameSource, isIdleScope);
             _cancellationSourceStack.Push(scope);
             return scope;
         }
@@ -112,8 +109,10 @@ namespace Microsoft.PowerShell.EditorServices.Services.PowerShell.Utility
 
         public void Dispose()
         {
+            // TODO: This is whack. It used to call `Cancel` on the cancellation source, but we
+            // shouldn't do that!
+            _cancellationSource.Dispose();
             _cancellationStack.TryPop(out CancellationScope _);
-            _cancellationSource.Cancel();
         }
     }
 }

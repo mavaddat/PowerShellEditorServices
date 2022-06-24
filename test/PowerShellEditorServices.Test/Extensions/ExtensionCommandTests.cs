@@ -47,8 +47,8 @@ namespace Microsoft.PowerShell.EditorServices.Test.Extensions
         public async Task CanRegisterAndInvokeCommandWithCmdletName()
         {
             string filePath = TestUtilities.NormalizePath("C:\\Temp\\Test.ps1");
-            var currentFile = new ScriptFile(new Uri(filePath), "This is a test file", new Version("7.0"));
-            var editorContext = new EditorContext(
+            ScriptFile currentFile = new(new Uri(filePath), "This is a test file", new Version("7.0"));
+            EditorContext editorContext = new(
                 editorOperations: null,
                 currentFile,
                 new BufferPosition(line: 1, column: 1),
@@ -83,8 +83,8 @@ namespace Microsoft.PowerShell.EditorServices.Test.Extensions
         public async Task CanRegisterAndInvokeCommandWithScriptBlock()
         {
             string filePath = TestUtilities.NormalizePath("C:\\Temp\\Test.ps1");
-            var currentFile = new ScriptFile(new Uri(filePath), "This is a test file", new Version("7.0"));
-            var editorContext = new EditorContext(
+            ScriptFile currentFile = new(new Uri(filePath), "This is a test file", new Version("7.0"));
+            EditorContext editorContext = new(
                 editorOperations: null,
                 currentFile,
                 new BufferPosition(line: 1, column: 1),
@@ -144,8 +144,8 @@ namespace Microsoft.PowerShell.EditorServices.Test.Extensions
         public async Task CanUnregisterCommand()
         {
             string filePath = TestUtilities.NormalizePath("C:\\Temp\\Test.ps1");
-            var currentFile = new ScriptFile(new Uri(filePath), "This is a test file", new Version("7.0"));
-            var editorContext = new EditorContext(
+            ScriptFile currentFile = new(new Uri(filePath), "This is a test file", new Version("7.0"));
+            EditorContext editorContext = new(
                 editorOperations: null,
                 currentFile,
                 new BufferPosition(line: 1, column: 1),
@@ -178,6 +178,20 @@ namespace Microsoft.PowerShell.EditorServices.Test.Extensions
             // Ensure that the command has been unregistered
             await Assert.ThrowsAsync<KeyNotFoundException>(
                 () => extensionCommandService.InvokeCommandAsync("test.scriptblock", editorContext)).ConfigureAwait(true);
+        }
+
+        [Fact]
+        public async Task CannotRemovePSEditorVariable()
+        {
+            ActionPreferenceStopException exception = await Assert.ThrowsAsync<ActionPreferenceStopException>(
+                () => psesHost.ExecutePSCommandAsync<string>(
+                    new PSCommand().AddScript("Remove-Variable psEditor -ErrorAction Stop"),
+                    CancellationToken.None)
+            ).ConfigureAwait(true);
+
+            Assert.Equal(
+                "The running command stopped because the preference variable \"ErrorActionPreference\" or common parameter is set to Stop: Cannot remove variable psEditor because it is constant or read-only. If the variable is read-only, try the operation again specifying the Force option.",
+                exception.Message);
         }
     }
 }

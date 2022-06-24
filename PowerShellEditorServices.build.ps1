@@ -33,13 +33,14 @@ $script:IsNix = $IsLinux -or $IsMacOS
 # For Apple M1, pwsh might be getting emulated, in which case we need to check
 # for the proc_translated flag, otherwise we can check the architecture.
 $script:IsAppleM1 = $IsMacOS -and ((sysctl -n sysctl.proc_translated) -eq 1 -or (uname -m) -eq "arm64")
+$script:IsArm64 = -not $script:IsNix -and @("ARM64", "AMD64") -contains $env:PROCESSOR_ARCHITECTURE
 $script:BuildInfoPath = [System.IO.Path]::Combine($PSScriptRoot, "src", "PowerShellEditorServices.Hosting", "BuildInfo.cs")
 $script:PsesCommonProps = [xml](Get-Content -Raw "$PSScriptRoot/PowerShellEditorServices.Common.props")
 
 $script:NetRuntime = @{
     PS7 = 'netcoreapp3.1'
     PS72 = 'net6.0'
-    Desktop = 'net461'
+    Desktop = 'net462'
     Standard = 'netstandard2.0'
 }
 
@@ -55,11 +56,14 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 
 task FindDotNet {
     assert (Get-Command dotnet -ErrorAction SilentlyContinue) "dotnet not found, please install it: https://aka.ms/dotnet-cli"
-    assert ([Version](dotnet --version) -ge [Version]("6.0")) ".NET SDK 6.0 or higher is required, please update it: https://aka.ms/dotnet-cli"
+
+    # Strip out semantic version metadata so it can be cast to `Version`
+    $existingVersion, $null = (dotnet --version) -split '-'
+    assert ([Version]$existingVersion -ge [Version]("6.0")) ".NET SDK 6.0 or higher is required, please update it: https://aka.ms/dotnet-cli"
 
     # Anywhere other than on a Mac with an M1 processor, we additionally
     # need the .NET 3.1 runtime for our netcoreapp3.1 framework.
-    if (!$script:IsAppleM1) {
+    if (-not $script:IsAppleM1 -and -not $script:IsArm64) {
         $runtimes = dotnet --list-runtimes
         assert ($runtimes -match "Microsoft.NETCore.App 3.1") ".NET Runtime 3.1 required but not found!"
     }
@@ -125,6 +129,9 @@ task CreateBuildInfo {
     [string]$buildTime = [datetime]::Today.ToString("s", [System.Globalization.CultureInfo]::InvariantCulture)
 
     $buildInfoContents = @"
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 using System.Globalization;
 
 namespace Microsoft.PowerShell.EditorServices.Hosting
@@ -177,7 +184,7 @@ Task TestServerWinPS -If (-not $script:IsNix) Build, SetupHelpForTests, {
     exec { & dotnet $script:dotnetTestArgs $script:NetRuntime.Desktop }
 }
 
-task TestServerPS7 -If (-not $script:IsAppleM1) Build, SetupHelpForTests, {
+task TestServerPS7 -If (-not $script:IsAppleM1 -and -not $script:IsArm64) Build, SetupHelpForTests, {
     Set-Location .\test\PowerShellEditorServices.Test\
     exec { & dotnet $script:dotnetTestArgs $script:NetRuntime.PS7 }
 }
@@ -191,11 +198,16 @@ task TestE2E Build, SetupHelpForTests, {
     Set-Location .\test\PowerShellEditorServices.Test.E2E\
 
     $env:PWSH_EXE_NAME = if ($IsCoreCLR) { "pwsh" } else { "powershell" }
-    $NetRuntime = if ($IsAppleM1) { $script:NetRuntime.PS72 } else { $script:NetRuntime.PS7 }
+    $NetRuntime = if ($IsAppleM1 -or $script:IsArm64) { $script:NetRuntime.PS72 } else { $script:NetRuntime.PS7 }
     exec { & dotnet $script:dotnetTestArgs $NetRuntime }
 
     # Run E2E tests in ConstrainedLanguage mode.
     if (!$script:IsNix) {
+        if (-not [Security.Principal.WindowsIdentity]::GetCurrent().Owner.IsWellKnown("BuiltInAdministratorsSid")) {
+            Write-Warning 'Skipping E2E CLM tests as they must be ran in an elevated process.'
+            return
+        }
+
         try {
             [System.Environment]::SetEnvironmentVariable("__PSLockdownPolicy", "0x80000007", [System.EnvironmentVariableTarget]::Machine);
             exec { & dotnet $script:dotnetTestArgs $script:NetRuntime.PS7 }

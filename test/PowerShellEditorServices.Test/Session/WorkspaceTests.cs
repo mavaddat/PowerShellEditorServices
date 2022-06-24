@@ -14,7 +14,7 @@ namespace Microsoft.PowerShell.EditorServices.Test.Session
 {
     public class WorkspaceTests
     {
-        private static readonly Lazy<string> s_lazyDriveLetter = new Lazy<string>(() => Path.GetFullPath("\\").Substring(0, 1));
+        private static readonly Lazy<string> s_lazyDriveLetter = new(() => Path.GetFullPath("\\").Substring(0, 1));
 
         public static string CurrentDriveLetter => RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
             ? s_lazyDriveLetter.Value
@@ -29,7 +29,7 @@ namespace Microsoft.PowerShell.EditorServices.Test.Session
             string testPathOutside = TestUtilities.NormalizePath("c:/Test/PeerPath/FilePath.ps1");
             string testPathAnotherDrive = TestUtilities.NormalizePath("z:/TryAndFindMe/FilePath.ps1");
 
-            WorkspaceService workspace = new WorkspaceService(NullLoggerFactory.Instance);
+            WorkspaceService workspace = new(NullLoggerFactory.Instance);
 
             // Test without a workspace path
             Assert.Equal(testPathOutside, workspace.GetRelativePath(testPathOutside));
@@ -46,17 +46,18 @@ namespace Microsoft.PowerShell.EditorServices.Test.Session
 
         internal static WorkspaceService FixturesWorkspace()
         {
-            return new WorkspaceService(NullLoggerFactory.Instance) {
+            return new WorkspaceService(NullLoggerFactory.Instance)
+            {
                 WorkspacePath = TestUtilities.NormalizePath("Fixtures/Workspace")
             };
         }
 
         // These are the default values for the EnumeratePSFiles() method
         // in Microsoft.PowerShell.EditorServices.Workspace class
-        private static string[] s_defaultExcludeGlobs        = Array.Empty<string>();
-        private static string[] s_defaultIncludeGlobs        = new [] { "**/*" };
-        private static int      s_defaultMaxDepth            = 64;
-        private static bool     s_defaultIgnoreReparsePoints = false;
+        private static readonly string[] s_defaultExcludeGlobs = Array.Empty<string>();
+        private static readonly string[] s_defaultIncludeGlobs = new[] { "**/*" };
+        private const int s_defaultMaxDepth = 64;
+        private const bool s_defaultIgnoreReparsePoints = false;
 
         internal static List<string> ExecuteEnumeratePSFiles(
             WorkspaceService workspace,
@@ -66,14 +67,14 @@ namespace Microsoft.PowerShell.EditorServices.Test.Session
             bool ignoreReparsePoints
         )
         {
-            var result = workspace.EnumeratePSFiles(
+            IEnumerable<string> result = workspace.EnumeratePSFiles(
                 excludeGlobs: excludeGlobs,
                 includeGlobs: includeGlobs,
                 maxDepth: maxDepth,
                 ignoreReparsePoints: ignoreReparsePoints
             );
-            var fileList = new List<string>();
-            foreach (string file in result) { fileList.Add(file); }
+            List<string> fileList = new();
+            fileList.AddRange(result);
             // Assume order is not important from EnumeratePSFiles and sort the array so we can use deterministic asserts
             fileList.Sort();
 
@@ -84,8 +85,8 @@ namespace Microsoft.PowerShell.EditorServices.Test.Session
         [Trait("Category", "Workspace")]
         public void CanRecurseDirectoryTree()
         {
-            var workspace = FixturesWorkspace();
-            var fileList = ExecuteEnumeratePSFiles(
+            WorkspaceService workspace = FixturesWorkspace();
+            List<string> fileList = ExecuteEnumeratePSFiles(
                 workspace: workspace,
                 excludeGlobs: s_defaultExcludeGlobs,
                 includeGlobs: s_defaultIncludeGlobs,
@@ -119,8 +120,8 @@ namespace Microsoft.PowerShell.EditorServices.Test.Session
         [Trait("Category", "Workspace")]
         public void CanRecurseDirectoryTreeWithLimit()
         {
-            var workspace = FixturesWorkspace();
-            var fileList = ExecuteEnumeratePSFiles(
+            WorkspaceService workspace = FixturesWorkspace();
+            List<string> fileList = ExecuteEnumeratePSFiles(
                 workspace: workspace,
                 excludeGlobs: s_defaultExcludeGlobs,
                 includeGlobs: s_defaultIncludeGlobs,
@@ -128,7 +129,7 @@ namespace Microsoft.PowerShell.EditorServices.Test.Session
                 ignoreReparsePoints: s_defaultIgnoreReparsePoints
             );
 
-            Assert.Equal(1, fileList.Count);
+            Assert.Single(fileList);
             Assert.Equal(Path.Combine(workspace.WorkspacePath, "rootfile.ps1"), fileList[0]);
         }
 
@@ -136,11 +137,11 @@ namespace Microsoft.PowerShell.EditorServices.Test.Session
         [Trait("Category", "Workspace")]
         public void CanRecurseDirectoryTreeWithGlobs()
         {
-            var workspace = FixturesWorkspace();
-            var fileList = ExecuteEnumeratePSFiles(
+            WorkspaceService workspace = FixturesWorkspace();
+            List<string> fileList = ExecuteEnumeratePSFiles(
                 workspace: workspace,
-                excludeGlobs: new [] {"**/donotfind*"},         // Exclude any files starting with donotfind
-                includeGlobs: new [] {"**/*.ps1", "**/*.psd1"}, // Only include PS1 and PSD1 files
+                excludeGlobs: new[] { "**/donotfind*" },         // Exclude any files starting with donotfind
+                includeGlobs: new[] { "**/*.ps1", "**/*.psd1" }, // Only include PS1 and PSD1 files
                 maxDepth: s_defaultMaxDepth,
                 ignoreReparsePoints: s_defaultIgnoreReparsePoints
             );
@@ -157,8 +158,8 @@ namespace Microsoft.PowerShell.EditorServices.Test.Session
             string tempDir = Path.GetTempPath();
             string shortDirPath = Path.Combine(tempDir, "GitHub", "PowerShellEditorServices");
             string shortFilePath = Path.Combine(shortDirPath, "foo.ps1");
-            string shortUriForm = "git:/c%3A/Users/Keith/GitHub/dahlbyk/posh-git/src/PoshGitTypes.ps1?%7B%22path%22%3A%22c%3A%5C%5CUsers%5C%5CKeith%5C%5CGitHub%5C%5Cdahlbyk%5C%5Cposh-git%5C%5Csrc%5C%5CPoshGitTypes.ps1%22%2C%22ref%22%3A%22~%22%7D";
-            string longUriForm = "gitlens-git:c%3A%5CUsers%5CKeith%5CGitHub%5Cdahlbyk%5Cposh-git%5Csrc%5CPoshGitTypes%3Ae0022701.ps1?%7B%22fileName%22%3A%22src%2FPoshGitTypes.ps1%22%2C%22repoPath%22%3A%22c%3A%2FUsers%2FKeith%2FGitHub%2Fdahlbyk%2Fposh-git%22%2C%22sha%22%3A%22e0022701fa12e0bc22d0458673d6443c942b974a%22%7D";
+            const string shortUriForm = "git:/c%3A/Users/Keith/GitHub/dahlbyk/posh-git/src/PoshGitTypes.ps1?%7B%22path%22%3A%22c%3A%5C%5CUsers%5C%5CKeith%5C%5CGitHub%5C%5Cdahlbyk%5C%5Cposh-git%5C%5Csrc%5C%5CPoshGitTypes.ps1%22%2C%22ref%22%3A%22~%22%7D";
+            const string longUriForm = "gitlens-git:c%3A%5CUsers%5CKeith%5CGitHub%5Cdahlbyk%5Cposh-git%5Csrc%5CPoshGitTypes%3Ae0022701.ps1?%7B%22fileName%22%3A%22src%2FPoshGitTypes.ps1%22%2C%22repoPath%22%3A%22c%3A%2FUsers%2FKeith%2FGitHub%2Fdahlbyk%2Fposh-git%22%2C%22sha%22%3A%22e0022701fa12e0bc22d0458673d6443c942b974a%22%7D";
 
             var testCases = new[] {
                 // Test short file absolute paths
